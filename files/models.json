@@ -1,0 +1,15 @@
+{
+  "$schema": "https://pi.dev/schemas/models.schema.json",
+  "providers": {
+    "anyrouter": {
+      "modelOverrides": {
+        "gpt-6.1-sol": {
+          "contextWindow": 500000
+        },
+        "gpt-6-astra": {
+          "contextWindow": 500000
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,51 @@
+{
+  "lastChangelogVersion": "1.5.1",
+  "packages": [
+    "npm:pi-web-access",
+    "npm:@juicesharp/rpiv-ask-user-question",
+    "npm:@juanibiapina/pi-extension-settings",
+    "npm:@narumitw/pi-goal",
+    "npm:@narumitw/pi-plan-mode",
+    "npm:@juicesharp/rpiv-todo",
+    "npm:@narumitw/pi-btw",
+    "npm:@ff-labs/pi-fff",
+    "npm:pi-browser-harness",
+    {
+      "source": "npm:pi-zentui",
+      "extensions": [
+        "-extensions/zentui/index.ts"
+      ]
+    },
+    "npm:pi-clinepass-provider",
+    "npm:pi-minimal-statusbar",
+    "npm:@narumitw/pi-sync"
+  ],
+  "extensionChangelogVersions": {
+    "{\"source\":\"npm:pi-web-access\",\"scope\":\"user\"}": "0.47.0",
+    "{\"source\":\"npm:@narumitw/pi-goal\",\"scope\":\"user\"}": "0.55.0",
+    "{\"source\":\"npm:@narumitw/pi-plan-mode\",\"scope\":\"user\"}": "0.60.0",
+    "{\"source\":\"npm:@narumitw/pi-btw\",\"scope\":\"user\"}": "0.63.5",
+    "{\"source\":\"npm:pi-browser-harness\",\"scope\":\"user\"}": "0.17.0",
+    "{\"source\":\"npm:pi-open-tui\",\"scope\":\"user\"}": "0.4.4",
+    "{\"source\":\"npm:pi-clinepass-provider\",\"scope\":\"user\"}": "1.7.0",
+    "{\"source\":\"npm:pi-minimal-statusbar\",\"scope\":\"user\"}": "0.1.6",
+    "{\"source\":\"npm:@narumitw/pi-sync\",\"scope\":\"user\"}": "0.58.0"
+  },
+  "defaultProvider": "mistral-responses",
+  "defaultModel": "deepseek-v4-1-flash-1017",
+  "enabledModels": [
+    "anyrouter/gpt-6-astra",
+    "anyrouter/gpt-6.1-sol",
+    "mistral-responses/deepseek-v4-1-flash-1017",
+    "mistral-responses/mistral-large-4",
+    "mistral-responses/zai-glm-5-3",
+    "mistral-responses/zai-glm-5-3-flash",
+    "anyrouter/claude-fable-5-2"
+  ],
+  "minimal-footer": {
+    "showTps": true,
+    "showTtft": true,
+    "showCacheStats": true,
+    "hideZeroCache": false
+  }
+}
