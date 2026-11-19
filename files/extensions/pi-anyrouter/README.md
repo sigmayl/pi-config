@@ -7,6 +7,7 @@
   - `gpt` → OpenAI Responses 协议（`openai-responses`）
   - `claude` → Claude Code Messages 协议（`anthropic-messages`）
 - 针对中转站“挤容量”的 429/5xx 重试：只对本 provider 生效，高频重试，不影响 Pi 的全局重试设置。
+- 持久化 prompt 缓存键（session id / `prompt_cache_key`）：`/ar-change-cache-key` 可强制刷新；压缩时也会携带。
 - 复用 Pi 内置的模型元数据（上下文长度、最大输出、thinking 等），并保留 `models.json` 覆盖能力。
 
 ## 安装
@@ -104,6 +105,29 @@ Working 行（TUI）:  ⠋ anyrouter 429 · retry 3/60 · 4s (esc to interrupt)
 | `ANYROUTER_RETRY_STATUSES` | `429,500,502,503,504` | 需要重试的 HTTP 状态码，逗号分隔；设为 `429` 可恢复旧行为 |
 | `ANYROUTER_RETRY_NOTICE` | `on` | 是否在 working 行 / 页脚显示重试进度；`off` 关闭 |
 
+## 缓存键（session id / prompt_cache_key）
+
+AnyRouter 用 session id 做渠道亲和与 prompt 缓存。插件为每个 Pi 会话持久化一个缓存键，存放在 `~/.pi/agent/anyrouter-cache-keys.json`，并把它作为 provider 的 `sessionId` 发给中转站：
+
+- OpenAI Responses（默认）：作为 `prompt_cache_key`，并写入 `session-id`、`x-client-request-id` 请求头。
+- OpenAI Completions：同样作为 `prompt_cache_key`；若中转不认这个字段，可用 `ANYROUTER_OPENAI_API=openai-responses` 回到默认协议。
+- 重启、恢复会话后键保持不变，缓存和渠道亲和不会丢。
+
+斜杠指令：
+
+```text
+/ar-change-cache-key            # 生成新键并强制刷新（下一轮请求进入全新缓存命名空间）
+/ar-change-cache-key status     # 查看当前键
+/ar-change-cache-key reset      # 删除覆盖并持久化，回退到 Pi 自己的 session id
+/ar-change-cache-key <key>      # 使用指定的键
+```
+
+压缩（`/compact`、自动压缩、分支摘要）时 Pi 会把请求标成 `cacheRetention: "none"` 并给一个临时 session id。插件会复用当前会话的缓存键，并把 retention 恢复为 `short`（`PI_CACHE_RETENTION=long` 时为 `long`），让摘要请求同样携带 `prompt_cache_key`，避免落到新的缓存命名空间。不需要这个行为时：
+
+```bash
+ANYROUTER_COMPACT_PROMPT_CACHE_KEY=off
+```
+
 ## 全部配置
 
 | 环境变量 | 默认值 | 说明 |
@@ -119,6 +143,8 @@ Working 行（TUI）:  ⠋ anyrouter 429 · retry 3/60 · 4s (esc to interrupt)
 | `ANYROUTER_ANTHROPIC_AUTH` | `both` | `both` 同时发 `x-api-key` 和 `Authorization`；`bearer` 只发 Bearer；`x-api-key` 只发 SDK 默认头 |
 | `ANYROUTER_CONTEXT_WINDOW` | 自动 | 强制覆盖所有模型的上下文窗口 |
 | `ANYROUTER_MAX_TOKENS` | 自动 | 强制覆盖所有模型的最大输出 |
+| `ANYROUTER_CACHE_KEY_FILE` | `~/.pi/agent/anyrouter-cache-keys.json` | 缓存键持久化文件 |
+| `ANYROUTER_COMPACT_PROMPT_CACHE_KEY` | `on` | 压缩/摘要请求是否携带当前会话的 `prompt_cache_key` |
 
 示例：如果中转只支持 Chat Completions：
 

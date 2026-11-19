@@ -1,4 +1,4 @@
-import type { AnyModel, Api, Model, ModelCost, RefreshModelsContext } from "@earendil-works/pi-ai";
+import type { AnyModel, Api, FetchFunction, Model, ModelCost, RefreshModelsContext } from "@earendil-works/pi-ai";
 import { getBuiltinModels } from "@earendil-works/pi-ai/providers/all";
 import type { MistralResponsesConfig } from "./config.ts";
 
@@ -122,7 +122,7 @@ function isChatModel(model: AnyModel): model is Model<Api> {
 
 function storedModels(context: RefreshModelsContext): Model<Api>[] {
 	const stored = context.stored?.models ?? [];
-	return stored.filter((model) => model.provider === PROVIDER_ID && isChatModel(model));
+	return stored.filter((model): model is Model<Api> => model.provider === PROVIDER_ID && isChatModel(model));
 }
 
 /**
@@ -133,6 +133,7 @@ function storedModels(context: RefreshModelsContext): Model<Api>[] {
 export async function discoverModels(
 	context: RefreshModelsContext,
 	config: MistralResponsesConfig,
+	fetchModels: FetchFunction = globalThis.fetch,
 ): Promise<Model<Api>[]> {
 	const stored = storedModels(context);
 	const apiKey = context.credential?.type === "api_key" ? context.credential.key?.trim() : undefined;
@@ -140,7 +141,7 @@ export async function discoverModels(
 
 	let live: LiveModel[];
 	try {
-		const response = await fetch(config.modelsUrl, {
+		const response = await fetchModels(config.modelsUrl, {
 			method: "GET",
 			headers: { accept: "application/json", Authorization: `Bearer ${apiKey}` },
 			signal: context.signal,

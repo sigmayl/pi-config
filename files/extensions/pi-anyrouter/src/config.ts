@@ -26,6 +26,10 @@ export interface AnyRouterConfig {
 	retry: RetryConfig;
 	/** Show squeeze retries in Pi's working line and footer instead of retrying silently. */
 	retryNotice: boolean;
+	/** Persist the plugin-managed prompt-cache key here. Undefined uses the default under Pi's agent dir. */
+	cacheKeyFile?: string;
+	/** Carry the prompt-cache key on compaction/summary requests, which Pi marks cacheRetention:"none". */
+	compactPromptCacheKey: boolean;
 	contextWindowOverride?: number;
 	maxTokensOverride?: number;
 	explicitModels: string[];
@@ -127,6 +131,8 @@ export function loadConfig(env: Env = process.env): AnyRouterConfig {
 			retryStatuses: retryStatuses.length > 0 ? retryStatuses : [...DEFAULT_RETRY_STATUSES],
 		},
 		retryNotice: readBoolean(env, "ANYROUTER_RETRY_NOTICE", true),
+		cacheKeyFile: readEnv(env, "ANYROUTER_CACHE_KEY_FILE"),
+		compactPromptCacheKey: readBoolean(env, "ANYROUTER_COMPACT_PROMPT_CACHE_KEY", true),
 		...(contextWindow > 0 ? { contextWindowOverride: contextWindow } : {}),
 		...(maxTokens > 0 ? { maxTokensOverride: maxTokens } : {}),
 		explicitModels: splitList(env.ANYROUTER_MODELS, []),

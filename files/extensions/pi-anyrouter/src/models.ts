@@ -144,6 +144,13 @@ export function buildModel(id: string, kind: ModelKind, config: AnyRouterConfig)
 	const api = kind === "claude" ? config.claudeApi : config.openaiApi;
 	const baseUrl = kind === "claude" ? config.anthropicBaseUrl : config.openaiBaseUrl;
 	const compat = withoutFallbackModels(builtin?.compat);
+	// openai-completions only sends prompt_cache_key to api.openai.com under the
+	// default "auto" mode. AnyRouter is a relay, so opt in explicitly; otherwise
+	// the persisted cache key would be ignored on the Chat Completions fallback.
+	const modelCompat =
+		kind === "openai" && api === "openai-completions" && !compat?.promptCacheKeyMode
+			? { ...(compat ?? {}), promptCacheKeyMode: "enabled" }
+			: compat;
 
 	return {
 		id,
@@ -159,7 +166,7 @@ export function buildModel(id: string, kind: ModelKind, config: AnyRouterConfig)
 		...(builtin?.promptCache ? { promptCache: builtin.promptCache } : {}),
 		contextWindow: config.contextWindowOverride ?? builtin?.contextWindow ?? inferContextWindow(id, kind),
 		maxTokens: config.maxTokensOverride ?? builtin?.maxTokens ?? inferMaxTokens(id, kind),
-		...(compat ? { compat: compat as Model<Api>["compat"] } : {}),
+		...(modelCompat ? { compat: modelCompat as Model<Api>["compat"] } : {}),
 	};
 }
 

@@ -4,6 +4,7 @@ import { openAIResponsesApi } from "@earendil-works/pi-ai/compat";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createMistralAuth } from "./api-key.ts";
 import { loadConfig } from "./config.ts";
+import { createEchTransport } from "./ech.ts";
 import { baselineModels, discoverModels, PROVIDER_ID, PROVIDER_NAME } from "./models.ts";
 
 /**
@@ -13,6 +14,9 @@ import { baselineModels, discoverModels, PROVIDER_ID, PROVIDER_NAME } from "./mo
  */
 export default function mistralResponsesProvider(pi: ExtensionAPI): void {
 	const config = loadConfig();
+	const ech = createEchTransport(config.ech);
+	const responses = openAIResponsesApi();
+	if (ech) pi.on("session_shutdown", () => ech.close());
 
 	pi.registerProvider(
 		createProvider<Api>({
@@ -21,8 +25,16 @@ export default function mistralResponsesProvider(pi: ExtensionAPI): void {
 			baseUrl: config.baseUrl,
 			auth: { apiKey: createMistralAuth() },
 			models: baselineModels(config.baseUrl),
-			api: openAIResponsesApi(),
-			fetchModels: (context) => discoverModels(context, config),
+			api: ech
+				? {
+						...responses,
+						stream: (model, context, options) =>
+							responses.stream(model, context, { ...options, fetch: ech.wrapFetch(options?.fetch) }),
+						streamSimple: (model, context, options) =>
+							responses.streamSimple(model, context, { ...options, fetch: ech.wrapFetch(options?.fetch) }),
+					}
+				: responses,
+			fetchModels: (context) => discoverModels(context, config, ech?.wrapFetch()),
 		}),
 	);
 }

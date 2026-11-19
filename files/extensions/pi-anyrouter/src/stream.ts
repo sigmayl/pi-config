@@ -6,6 +6,14 @@ import type { RetryStatusReporter } from "./retry-status.ts";
 
 type ChatOptions = StreamOptions | SimpleStreamOptions;
 
+/** Looks up the plugin-managed prompt-cache key for a request. */
+export interface CacheKeySource {
+	/** Key for a known Pi session id, or undefined for one-off summary requests. */
+	keyForSession(sessionId: string | undefined): string | undefined;
+	/** Key of the active session, reused for compaction/branch summaries. */
+	activeKey(): string | undefined;
+}
+
 function openAICompatibleApi(api: OpenAICompatibleApi): ProviderStreams {
 	return api === "openai-completions" ? openAICompletionsApi() : openAIResponsesApi();
 }
@@ -31,17 +39,37 @@ function anthropicHeaders(
 	return { ...(headers ?? {}), Authorization: `Bearer ${apiKey}` };
 }
 
+function summaryCacheRetention(options: ChatOptions | undefined): "short" | "long" {
+	const env = options?.env?.PI_CACHE_RETENTION ?? process.env.PI_CACHE_RETENTION;
+	return env?.trim().toLowerCase() === "long" ? "long" : "short";
+}
+
 function prepareOptions<T extends ChatOptions>(
 	options: T | undefined,
 	config: AnyRouterConfig,
 	isAnthropic: boolean,
 	retryStatus?: RetryStatusReporter,
+	cacheKeys?: CacheKeySource,
 ): T {
 	const apiKey = options?.apiKey;
 	const headers = isAnthropic ? anthropicHeaders(options?.headers, apiKey, config) : options?.headers;
+	// Pi marks compaction and branch-summary requests cacheRetention:"none" and
+	// gives them a fresh session id. AnyRouter routes and caches by
+	// prompt_cache_key, so reuse the active session key there too; otherwise the
+	// summary request lands in a new cache namespace and loses channel affinity.
+	const sessionKey = cacheKeys?.keyForSession(options?.sessionId);
+	const isSummary = options?.cacheRetention === "none" && !sessionKey;
+	const cacheKey = sessionKey ?? (isSummary ? cacheKeys?.activeKey() : undefined);
 	const prepared = {
 		...options,
 		...(headers ? { headers } : {}),
+		...(cacheKey ? { sessionId: cacheKey } : {}),
+		// Only OpenAI-compatible APIs key their prompt cache on prompt_cache_key.
+		// Anthropic caches by content, so re-enabling retention there would only
+		// add one-off cache writes for the summary prompt.
+		...(cacheKey && isSummary && !isAnthropic && config.compactPromptCacheKey
+			? { cacheRetention: summaryCacheRetention(options) }
+			: {}),
 		// Provider-scoped retry: statuses from ANYROUTER_RETRY_STATUSES (429 and
 		// 5xx by default) are retried by the fetch wrapper below. Disable the API
 		// implementation's slower provider retry so it cannot add a second,
@@ -70,21 +98,23 @@ function wrapApi(
 	config: AnyRouterConfig,
 	isAnthropic: boolean,
 	retryStatus?: RetryStatusReporter,
+	cacheKeys?: CacheKeySource,
 ): ProviderStreams {
 	return {
 		stream: (model, context, options) =>
-			api.stream(model, context, prepareOptions(options, config, isAnthropic, retryStatus)),
+			api.stream(model, context, prepareOptions(options, config, isAnthropic, retryStatus, cacheKeys)),
 		streamSimple: (model, context, options) =>
-			api.streamSimple(model, context, prepareOptions(options, config, isAnthropic, retryStatus)),
+			api.streamSimple(model, context, prepareOptions(options, config, isAnthropic, retryStatus, cacheKeys)),
 	};
 }
 
 export function createStreams(
 	config: AnyRouterConfig,
 	retryStatus?: RetryStatusReporter,
+	cacheKeys?: CacheKeySource,
 ): Partial<Record<Api, ProviderStreams>> {
 	const streams: Partial<Record<Api, ProviderStreams>> = {};
-	streams[config.openaiApi] = wrapApi(openAICompatibleApi(config.openaiApi), config, false, retryStatus);
-	streams[config.claudeApi] = wrapApi(anthropicMessagesApi(), config, true, retryStatus);
+	streams[config.openaiApi] = wrapApi(openAICompatibleApi(config.openaiApi), config, false, retryStatus, cacheKeys);
+	streams[config.claudeApi] = wrapApi(anthropicMessagesApi(), config, true, retryStatus, cacheKeys);
 	return streams;
 }

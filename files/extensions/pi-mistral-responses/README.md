@@ -7,6 +7,7 @@
 - 默认端点：`https://api.mistral.ai/v1`（`POST /v1/responses`）
 - 自动读取模型列表：`GET /v1/models`，只保留 `capabilities.completion_chat` 为真的模型，
   跳过 embedding / OCR / TTS / 转写模型和已废弃模型
+- Node.js 24+ 安装 `lemon-tls` 后，模型发现和 Responses 请求可以在 Pi 进程内通过 ECH 直连 Mistral
 - 不覆盖内置 `mistral` 渠道：两个渠道并存，各自使用自己的协议
 
 ## 为什么用插件而不是 `models.json`
@@ -24,6 +25,17 @@ Pi 更新目录后过期。插件形式只声明“端点 + 协议”，模型�
 ```
 
 也可以用 `pi install /home/seey6/.pi/agent/extensions/pi-mistral-responses` 显式登记。
+
+## ECH 直连
+
+默认的 `auto` 模式在 Node.js 24+ 安装了 [lemon-tls](https://www.npmjs.com/package/lemon-tls) 时，
+为 `https://api.mistral.ai` 启用 ECH。插件通过 DoH 获取 `crypto.cloudflare.com` 的共享 ECH 配置，
+并尝试两个已验证的 Mistral 边缘 IP。模型发现和 Responses 流式请求复用同一连接池，TLS 校验
+`api.mistral.ai` 的证书并要求服务端接受 ECH。
+
+首次安装或升级插件时，在插件目录运行 `npm install` 获取依赖，再重启 Pi 或执行 `/reload`。
+`MISTRAL_RESPONSES_ECH=1` 可以要求当前 Node 环境提供 ECH，`MISTRAL_RESPONSES_ECH=0` 可恢复原有连接方式。
+其他域名上的自定义模型和 Responses 端点继续使用各自原有的连接方式。
 
 ## 认证
 
@@ -56,6 +68,7 @@ thinking 档位和上下文显示与内置渠道一致。
 | `MISTRAL_RESPONSES_BASE_URL` | `https://api.mistral.ai/v1` | 端点根路径，Responses 会拼 `/responses` |
 | `MISTRAL_RESPONSES_MODELS_URL` | `${baseUrl}/models` | 模型发现地址 |
 | `MISTRAL_RESPONSES_MODELS` | — | 逗号分隔的模型 ID，发现结果为空时作为兜底 |
+| `MISTRAL_RESPONSES_ECH` | `auto` | `auto` 自动启用，`1` 要求支持，`0` 关闭 |
 | `PI_CODING_AGENT_DIR` | `~/.pi/agent` | 读取 `auth.json` 的配置目录 |
 
 ## 使用
@@ -78,3 +91,4 @@ pi --model mistral-responses/deepseek-v4-1-flash-1017
 | `src/models.ts` | 模型发现、目录补齐、离线基线 |
 | `src/api-key.ts` | 三级凭证解析 |
 | `src/config.ts` | 环境变量 |
+| `src/ech.ts` | ECH 配置查询和 Mistral 直连 |

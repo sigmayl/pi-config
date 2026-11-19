@@ -15,6 +15,8 @@ test("uses anyrouter.top defaults", () => {
 	assert.equal(config.anthropicAuthMode, "both");
 	assert.equal(config.retry.maxRetries, 60);
 	assert.deepEqual(config.retry.retryStatuses, [429, 500, 502, 503, 504]);
+	assert.equal(config.compactPromptCacheKey, true);
+	assert.equal(config.cacheKeyFile, undefined);
 });
 
 test("normalizes a /v1 root for both protocols", () => {
@@ -35,6 +37,8 @@ test("reads protocol, filter, auth, and retry overrides", () => {
 		ANYROUTER_RETRY_BASE_DELAY_MS: "50",
 		ANYROUTER_RETRY_MAX_DELAY_MS: "500",
 		ANYROUTER_RETRY_STATUSES: "429,503",
+		ANYROUTER_CACHE_KEY_FILE: "/tmp/anyrouter-keys.json",
+		ANYROUTER_COMPACT_PROMPT_CACHE_KEY: "off",
 	});
 	assert.equal(config.openaiApi, "openai-completions");
 	assert.deepEqual(config.openaiKeywords, ["gpt", "o3"]);
@@ -43,6 +47,8 @@ test("reads protocol, filter, auth, and retry overrides", () => {
 	assert.equal(config.retry.baseDelayMs, 50);
 	assert.equal(config.retry.maxDelayMs, 500);
 	assert.deepEqual(config.retry.retryStatuses, [429, 503]);
+	assert.equal(config.cacheKeyFile, "/tmp/anyrouter-keys.json");
+	assert.equal(config.compactPromptCacheKey, false);
 });
 
 test("parses explicit model lists", () => {

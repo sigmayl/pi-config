@@ -1,4 +1,7 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import test from "node:test";
 import type { Provider } from "@earendil-works/pi-ai";
 import anyrouterProvider from "../src/index.ts";
@@ -55,29 +58,37 @@ function fakeRelay(
 interface FakeUI {
 	workingMessages: Array<string | undefined>;
 	statuses: Array<[string, string | undefined]>;
+	notifications: Array<[string, string | undefined]>;
 	setWorkingMessage(message?: string): void;
 	setStatus(key: string, text: string | undefined): void;
+	notify(message: string, type?: "info" | "warning" | "error"): void;
 }
 
 function fakeUI(): FakeUI {
 	const ui: FakeUI = {
 		workingMessages: [],
 		statuses: [],
+		notifications: [],
 		setWorkingMessage(message) {
 			ui.workingMessages.push(message);
 		},
 		setStatus(key, text) {
 			ui.statuses.push([key, text]);
 		},
+		notify(message, type) {
+			ui.notifications.push([message, type]);
+		},
 	};
 	return ui;
 }
 
-function fakePi(ui?: FakeUI): {
+function fakePi(ui?: FakeUI, sessionId?: string): {
 	provider: Provider;
 	handlers: Map<string, (event: unknown, ctx: unknown) => unknown>;
+	commands: Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>;
 } {
 	const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+	const commands = new Map<string, { handler: (args: string, ctx: unknown) => Promise<void> }>();
 	let provider: Provider | undefined;
 	anyrouterProvider({
 		registerProvider(value: Provider) {
@@ -87,10 +98,18 @@ function fakePi(ui?: FakeUI): {
 			handlers.set(event, handler);
 			return () => handlers.delete(event);
 		},
+		registerCommand(name: string, options: { handler: (args: string, ctx: unknown) => Promise<void> }) {
+			commands.set(name, options);
+		},
 	} as never);
 	assert.ok(provider);
-	if (ui) handlers.get("before_provider_request")?.({ type: "before_provider_request" }, { ui });
-	return { provider, handlers };
+	if (ui) {
+		handlers.get("before_provider_request")?.(
+			{ type: "before_provider_request" },
+			{ ui, sessionManager: { getSessionId: () => sessionId } },
+		);
+	}
+	return { provider, handlers, commands };
 }
 
 function register(): Provider {
@@ -332,5 +351,127 @@ test("OpenAI can use the Chat Completions fallback", async () => {
 		assert.match(relay.requests[0]?.url ?? "", /\/v1\/chat\/completions$/);
 	} finally {
 		delete process.env.ANYROUTER_OPENAI_API;
+	}
+});
+
+interface PromptCacheBody {
+	prompt_cache_key?: string;
+	prompt_cache_retention?: string;
+}
+
+async function streamBody(
+	provider: Provider,
+	model: ReturnType<typeof buildModel>,
+	options: Record<string, unknown>,
+): Promise<PromptCacheBody> {
+	const relay = fakeRelay(OPENAI_SSE, 0);
+	const stream = provider.streamSimple(model, userContext("hi") as never, {
+		apiKey: "sk-test",
+		maxTokens: 16,
+		fetch: relay.fetch as typeof globalThis.fetch,
+		...options,
+	});
+	await stream.result();
+	return JSON.parse(relay.requests[0]?.body ?? "{}") as PromptCacheBody;
+}
+
+test("persists, carries, and rotates the prompt cache key", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "anyrouter-cache-key-"));
+	const file = join(dir, "keys.json");
+	process.env.ANYROUTER_CACHE_KEY_FILE = file;
+	process.env.ANYROUTER_RETRY_BASE_DELAY_MS = "1";
+	process.env.ANYROUTER_RETRY_MAX_DELAY_MS = "1";
+	try {
+		const ui = fakeUI();
+		const sessionId = "01900000-0000-7000-8000-000000000001";
+		const { provider, handlers, commands } = fakePi(ui, sessionId);
+		const ctx = { ui, sessionManager: { getSessionId: () => sessionId } };
+		await handlers.get("session_start")?.({ type: "session_start", reason: "startup" }, ctx);
+
+		const model = buildModel("gpt-5.5", "openai", loadConfig(process.env));
+		const normal = await streamBody(provider, model, { sessionId });
+		assert.ok(normal.prompt_cache_key);
+		assert.notEqual(normal.prompt_cache_key, sessionId);
+
+		// Compaction gets a fresh session id and cacheRetention:"none" from Pi.
+		// The plugin must still send the active session's prompt_cache_key.
+		const summary = await streamBody(provider, model, {
+			sessionId: "01900000-0000-7000-8000-0000000000ff",
+			cacheRetention: "none",
+		});
+		assert.equal(summary.prompt_cache_key, normal.prompt_cache_key);
+
+		const command = commands.get("ar-change-cache-key");
+		assert.ok(command);
+		await command.handler("", { ...ctx, waitForIdle: async () => {} });
+
+		const rotated = await streamBody(provider, model, { sessionId });
+		assert.ok(rotated.prompt_cache_key);
+		assert.notEqual(rotated.prompt_cache_key, normal.prompt_cache_key);
+	} finally {
+		delete process.env.ANYROUTER_CACHE_KEY_FILE;
+		delete process.env.ANYROUTER_RETRY_BASE_DELAY_MS;
+		delete process.env.ANYROUTER_RETRY_MAX_DELAY_MS;
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("ANYROUTER_COMPACT_PROMPT_CACHE_KEY=off keeps summaries out of the cache namespace", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "anyrouter-cache-key-"));
+	const file = join(dir, "keys.json");
+	process.env.ANYROUTER_CACHE_KEY_FILE = file;
+	process.env.ANYROUTER_COMPACT_PROMPT_CACHE_KEY = "off";
+	try {
+		const ui = fakeUI();
+		const sessionId = "01900000-0000-7000-8000-000000000002";
+		const { provider, handlers } = fakePi(ui, sessionId);
+		await handlers.get("session_start")?.(
+			{ type: "session_start", reason: "startup" },
+			{ ui, sessionManager: { getSessionId: () => sessionId } },
+		);
+
+		const model = buildModel("gpt-5.5", "openai", loadConfig(process.env));
+		const summary = await streamBody(provider, model, {
+			sessionId: "01900000-0000-7000-8000-0000000000fe",
+			cacheRetention: "none",
+		});
+		assert.equal(summary.prompt_cache_key, undefined);
+	} finally {
+		delete process.env.ANYROUTER_CACHE_KEY_FILE;
+		delete process.env.ANYROUTER_COMPACT_PROMPT_CACHE_KEY;
+		await rm(dir, { recursive: true, force: true });
+	}
+});
+
+test("Chat Completions also sends the persisted prompt cache key", async () => {
+	const dir = await mkdtemp(join(tmpdir(), "anyrouter-cache-key-"));
+	const file = join(dir, "keys.json");
+	process.env.ANYROUTER_CACHE_KEY_FILE = file;
+	process.env.ANYROUTER_OPENAI_API = "openai-completions";
+	try {
+		const ui = fakeUI();
+		const sessionId = "01900000-0000-7000-8000-000000000003";
+		const { provider, handlers } = fakePi(ui, sessionId);
+		await handlers.get("session_start")?.(
+			{ type: "session_start", reason: "startup" },
+			{ ui, sessionManager: { getSessionId: () => sessionId } },
+		);
+
+		const model = buildModel("gpt-5.5", "openai", loadConfig(process.env));
+		const relay = fakeRelay(CHAT_COMPLETIONS_SSE, 0);
+		const stream = provider.streamSimple(model, userContext("hi") as never, {
+			apiKey: "sk-test",
+			maxTokens: 16,
+			fetch: relay.fetch as typeof globalThis.fetch,
+			sessionId,
+		});
+		await stream.result();
+		const body = JSON.parse(relay.requests[0]?.body ?? "{}") as { prompt_cache_key?: string };
+		assert.ok(body.prompt_cache_key);
+		assert.notEqual(body.prompt_cache_key, sessionId);
+	} finally {
+		delete process.env.ANYROUTER_CACHE_KEY_FILE;
+		delete process.env.ANYROUTER_OPENAI_API;
+		await rm(dir, { recursive: true, force: true });
 	}
 });

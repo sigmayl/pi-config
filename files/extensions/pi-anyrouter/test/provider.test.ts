@@ -14,6 +14,7 @@ function register(): Provider {
 		on() {
 			return () => {};
 		},
+		registerCommand() {},
 	} as never);
 	assert.ok(registered);
 	return registered;
