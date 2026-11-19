@@ -29,9 +29,10 @@ Pi 更新目录后过期。插件形式只声明“端点 + 协议”，模型�
 ## ECH 直连
 
 默认的 `auto` 模式在 Node.js 24+ 安装了 [lemon-tls](https://www.npmjs.com/package/lemon-tls) 时，
-为 `https://api.mistral.ai` 启用 ECH。插件通过 DoH 获取 `crypto.cloudflare.com` 的共享 ECH 配置，
-并尝试两个已验证的 Mistral 边缘 IP。模型发现和 Responses 流式请求复用同一连接池，TLS 校验
-`api.mistral.ai` 的证书并要求服务端接受 ECH。
+为 `https://api.mistral.ai` 启用 ECH。插件通过 Cloudflare 或 Google 的 DoH 解析 Mistral 的
+`A` 和 `AAAA` 记录，按 TTL 刷新地址。常规 DoH 受阻时，还可以通过 ECH 访问 Cloudflare 的
+Mozilla DoH 入口。AliDNS 参与获取 `crypto.cloudflare.com` 的共享 ECH 配置。
+模型发现和 Responses 流式请求复用同一连接池，TLS 校验 `api.mistral.ai` 的证书并要求服务端接受 ECH。
 
 首次安装或升级插件时，在插件目录运行 `npm install` 获取依赖，再重启 Pi 或执行 `/reload`。
 `MISTRAL_RESPONSES_ECH=1` 可以要求当前 Node 环境提供 ECH，`MISTRAL_RESPONSES_ECH=0` 可恢复原有连接方式。
